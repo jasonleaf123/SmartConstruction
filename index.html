@@ -242,6 +242,7 @@
             }
         }
     </script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
     <script type="module">
         import * as THREE from 'three';
@@ -800,6 +801,63 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- MQTT 物聯網實時控制整合 ---
+        const mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+        
+        mqttClient.on('connect', () => {
+            console.log('✅ MQTT 連線成功');
+            mqttClient.subscribe('smarthelmet/status', (err) => {
+                if (!err) console.log('✅ 成功訂閱 smarthelmet/status');
+            });
+            addAILog("🌐 系統：已連接至物聯網中心");
+        });
+
+        // Google Apps Script URL (請將此處替換為你的 GAS 部署網址)
+        // 1. 貼上你專屬的 Google Apps Script 網址
+        const gasUrl = "https://script.google.com/macros/s/AKfycbzNkK68pmViksz4clvTa8zMA9qoLTgzolaLFo9YW9KGoLlMspduWeVfpPO0-Ahmxiv1iw/exec"; 
+
+        mqttClient.on('message', (topic, message) => {
+            const msgStr = message.toString();
+            console.log(`收到 MQTT 訊息 [${topic}]: ${msgStr}`);
+
+            if (msgStr === "WARNING") {
+                let workerIdStr = "ESP32-Worker";
+                // 動作一（視覺）：將場景中第一個工人的頭部位顏色改為紅色，並彈出警告 UI
+                if (workers.length > 0) {
+                    const targetWorker = workers[0];
+                    workerIdStr = "ID-" + targetWorker.id; // 抓取 3D 工人的編號
+                    
+                    const redHatMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.4 });
+                    targetWorker.hatGroup.children[0].material = redHatMat;
+                    if(targetWorker.hatGroup.children.length > 1) {
+                        targetWorker.hatGroup.children[1].material = redHatMat; 
+                    }
+                    targetWorker.trackerBox.visible = true;
+                }
+                
+                // UI 彈出與面板更新
+                alert('警告：工人未佩戴頭盔！');
+                addAILog('🚨 實時警報：收到頭盔脫落警告！(來自 ESP32)');
+
+                // 2. 動作二（資料庫）：將資料打包成 JSON 格式發送，對應你的 Spreadsheet
+                const violationData = {
+                    workerId: workerIdStr,
+                    violation: "未佩戴頭盔 (ESP32觸發)"
+                };
+
+                fetch(gasUrl, {
+                    method: 'POST',
+                    body: JSON.stringify(violationData), // 將包裹轉成 JSON 字串
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避開跨域阻擋
+                    mode: 'no-cors' 
+                }).then(() => {
+                    console.log("✅ 違規紀錄已發送至 Google Apps Script");
+                }).catch(err => {
+                    console.error("❌ 發送紀錄失敗:", err);
+                });
+            }
         });
     </script>
 </body>
