@@ -816,46 +816,84 @@
 
         // Google Apps Script URL (請將此處替換為你的 GAS 部署網址)
         // 1. 貼上你專屬的 Google Apps Script 網址
-        const gasUrl = "https://script.google.com/macros/s/AKfycbwuFdaRuGCICrHfowwqpeh1hSu4IzNG9bI-3u4qYKQdCes1um_fD8TU-3sBdsr66iV3/exec"; 
+        const gasUrl = "xx"; 
         
+        // 建立一個專門負責上傳 Google Sheet 的函數，代碼更乾淨
+        function sendToGoogleSheet(workerId, violationType) {
+            const violationData = {
+                workerId: workerId,
+                violation: violationType
+            };
+
+            fetch(gasUrl, {
+                method: 'POST',
+                body: JSON.stringify(violationData),
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                mode: 'no-cors' 
+            }).then(() => {
+                console.log("✅ 成功寫入 Spreadsheet: " + violationType);
+            }).catch(err => {
+                console.error("❌ 寫入失敗:", err);
+            });
+        }
+
         mqttClient.on('message', (topic, message) => {
             const msgStr = message.toString();
-            console.log(`收到 MQTT 訊息 [${topic}]: ${msgStr}`);
+            console.log(`收到訊號: ${msgStr}`);
 
-            if (msgStr === "WARNING") {
-                let workerIdStr = "ESP32-Worker";
-                // 動作一（視覺）：將場景中第一個工人的頭部位顏色改為紅色，並彈出警告 UI
-                if (workers.length > 0) {
-                    const targetWorker = workers[0];
-                    workerIdStr = "ID-" + targetWorker.id; // 抓取 3D 工人的編號
-                    
-                    const redHatMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.4 });
-                    targetWorker.hatGroup.children[0].material = redHatMat;
-                    if(targetWorker.hatGroup.children.length > 1) {
-                        targetWorker.hatGroup.children[1].material = redHatMat; 
-                    }
-                    targetWorker.trackerBox.visible = true;
-                }
+            if (topic === 'smarthelmet/status') {
                 
-                // UI 彈出與面板更新
-                addAILog('🚨 實時警報：收到頭盔脫落警告！(來自 ESP32)');
+                // 狀況 A：未佩戴頭盔
+                if (msgStr === "HELMET_OFF") {
+                    if (workers.length > 0) {
+                        const targetWorker = workers[0];
+                        // 3D 模型變紅
+                        const redHatMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.4 });
+                        targetWorker.hatGroup.children[0].material = redHatMat;
+                        if(targetWorker.hatGroup.children.length > 1) targetWorker.hatGroup.children[1].material = redHatMat; 
+                        targetWorker.trackerBox.visible = true;
+                    }
+                    // 網頁 UI 顯示中文
+                    addAILog('🚨 實時警報：未佩帶頭盔！');
+                    // Google Sheet 紀錄英文
+                    sendToGoogleSheet("ID-ESP32", "not wearing helmet");
+                } 
+                
+                // 狀況 B：恢復佩戴頭盔
+                else if (msgStr === "HELMET_ON") {
+                    if (workers.length > 0) {
+                        const targetWorker = workers[0];
+                        // 3D 模型變回黃色
+                        const yellowMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.4 });
+                        targetWorker.hatGroup.children[0].material = yellowMat;
+                        if(targetWorker.hatGroup.children.length > 1) targetWorker.hatGroup.children[1].material = yellowMat; 
+                        targetWorker.trackerBox.visible = false;
+                    }
+                    addAILog('✅ 狀態更新：工人已重新佩帶頭盔。');
+                    // 恢復安全不用上傳 Sheet
+                }
 
-                // 2. 動作二（資料庫）：將資料打包成 JSON 格式發送，對應你的 Spreadsheet
-                const violationData = {
-                    workerId: workerIdStr,
-                    violation: "未佩戴頭盔 (ESP32觸發)"
-                };
-
-                fetch(gasUrl, {
-                    method: 'POST',
-                    body: JSON.stringify(violationData), // 將包裹轉成 JSON 字串
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 避開跨域阻擋
-                    mode: 'no-cors' 
-                }).then(() => {
-                    console.log("✅ 違規紀錄已發送至 Google Apps Script");
-                }).catch(err => {
-                    console.error("❌ 發送紀錄失敗:", err);
-                });
+                // 狀況 C：偵測到吸煙 (溫度 > 30)
+                else if (msgStr === "SMOKING") {
+                    if (workers.length > 0) {
+                        const targetWorker = workers[0];
+                        // 顯示煙霧粒子與紅色追蹤框
+                        targetWorker.smoke.visible = true;
+                        targetWorker.trackerBox.visible = true;
+                        
+                        // 設定 5 秒後煙霧自動消失 (避免一直擋住畫面)
+                        setTimeout(() => {
+                            targetWorker.smoke.visible = false;
+                            if(targetWorker.hatGroup.children[0].material.color.getHex() !== 0xff0000) {
+                                targetWorker.trackerBox.visible = false;
+                            }
+                        }, 5000);
+                    }
+                    // 網頁 UI 顯示中文
+                    addAILog('🚨 實時警報：正在吸煙！');
+                    // Google Sheet 紀錄英文
+                    sendToGoogleSheet("ID-ESP32", "smoking");
+                }
             }
         });
     </script>
